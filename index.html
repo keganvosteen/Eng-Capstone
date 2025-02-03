@@ -1,0 +1,153 @@
+```html
+   <!DOCTYPE html>
+   <html lang="en">
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+     <title>MediaPipe Squat Analyzer</title>
+     <style>
+       body {
+         margin: 0;
+         padding: 0;
+         background: #000;
+         color: #fff;
+         font-family: Arial, sans-serif;
+       }
+       #output {
+         position: relative;
+         width: 100vw;
+         height: 100vh;
+         overflow: hidden;
+       }
+       video, canvas {
+         position: absolute;
+         top: 0;
+         left: 0;
+         width: 100%;
+         height: 100%;
+         object-fit: cover;
+       }
+       #info {
+         position: absolute;
+         top: 10px;
+         left: 10px;
+         font-size: 1.2em;
+         background: rgba(0, 0, 0, 0.5);
+         padding: 10px;
+         border-radius: 5px;
+         z-index: 10;
+       }
+     </style>
+   </head>
+   <body>
+     <div id="output">
+       <video id="video" autoplay playsinline muted></video>
+       <canvas id="canvas"></canvas>
+       <div id="info">
+         <div id="squatCount">Squat Count: 0</div>
+         <div id="kneeAngle">Knee Angle: --</div>
+       </div>
+     </div>
+   
+     <!-- Include MediaPipe Pose and helper libraries -->
+     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1635980709/pose.js"></script>
+     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.5.1635980709/drawing_utils.js"></script>
+     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.5.1635980709/camera_utils.js"></script>
+   
+     <script>
+       // Get DOM elements
+       const videoElement = document.getElementById('video');
+       const canvasElement = document.getElementById('canvas');
+       const canvasCtx = canvasElement.getContext('2d');
+       const squatCountElement = document.getElementById('squatCount');
+       const kneeAngleElement = document.getElementById('kneeAngle');
+       
+       // Variables to track squat count and stage ("up" or "down")
+       let squatCount = 0;
+       let stage = null;
+   
+       // Function to calculate the angle between three points
+       function calculateAngle(a, b, c) {
+         // Calculate the angle in degrees at point 'b' formed by points a, b, and c.
+         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+         let angle = Math.abs(radians * 180.0 / Math.PI);
+         if (angle > 180) {
+           angle = 360 - angle;
+         }
+         return angle;
+       }
+   
+       // Instantiate MediaPipe Pose
+       const pose = new Pose.Pose({
+         locateFile: (file) => {
+           return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1635980709/${file}`;
+         }
+       });
+   
+       pose.setOptions({
+         modelComplexity: 1,
+         smoothLandmarks: true,
+         enableSegmentation: false,
+         smoothSegmentation: false,
+         minDetectionConfidence: 0.5,
+         minTrackingConfidence: 0.5
+       });
+   
+       pose.onResults(onResults);
+   
+       // This function runs on each video frame with the results from MediaPipe Pose.
+       function onResults(results) {
+         // Draw the video frame onto the canvas.
+         canvasCtx.save();
+         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+         canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+         
+         // If pose landmarks are detected, process them.
+         if (results.poseLandmarks) {
+           // Draw the pose landmarks and connectors.
+           Pose.drawConnectors(canvasCtx, results.poseLandmarks, Pose.POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+           Pose.drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2});
+           
+           // Use landmark indices: left hip (23), left knee (25), left ankle (27)
+           const leftHip = results.poseLandmarks[23];
+           const leftKnee = results.poseLandmarks[25];
+           const leftAnkle = results.poseLandmarks[27];
+   
+           if (leftHip && leftKnee && leftAnkle) {
+             const angle = calculateAngle(leftHip, leftKnee, leftAnkle);
+             kneeAngleElement.innerText = "Knee Angle: " + angle.toFixed(1) + "°";
+   
+             // Squat counter logic:
+             // If angle > 160°, assume the leg is "up" (standing).
+             // If angle < 70° from an "up" stage, count a squat.
+             if (angle > 160) {
+               stage = "up";
+             }
+             if (angle < 70 && stage === "up") {
+               stage = "down";
+               squatCount++;
+               squatCountElement.innerText = "Squat Count: " + squatCount;
+             }
+           }
+         }
+         canvasCtx.restore();
+       }
+   
+       // Setup the camera stream using MediaPipe Camera Utils.
+       const camera = new Camera.Camera(videoElement, {
+         onFrame: async () => {
+           await pose.send({ image: videoElement });
+         },
+         width: 640,
+         height: 480
+       });
+       camera.start();
+   
+       // Adjust the canvas size when the video metadata is loaded.
+       videoElement.addEventListener('loadedmetadata', () => {
+         canvasElement.width = videoElement.videoWidth;
+         canvasElement.height = videoElement.videoHeight;
+       });
+     </script>
+   </body>
+   </html>
